@@ -21,7 +21,8 @@ colnames(df3_2) <- df3_2[1,]
 head(df3_1)
 head(df3_2)
 colnames(df3_1)[1:2] <- c("brand","variable")
+colnames(df3_1)[3:]
 colnames(df3_2)[1:2] <- c("brand","variable")
 
-df3_1_melted <- melt(data=df3_1,id.vars = c("brand","variable"))
+df3_1_melted <- melt(data=df3_1,id.vars = c("brand","variable"),variable.name = "time")
 head(df3_1_melted)
