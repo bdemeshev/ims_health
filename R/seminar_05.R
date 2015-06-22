@@ -1,97 +1,150 @@
-# семинар 05
+# семинар 05 -- мультиколлинеарность
 
-library(readxl)
-library(glmnet)
-library(tidyr)
-library(lmtest)
-library(car)
-library(dplyr)
-library(psych)
-library(reshape2)
-library(lubridate)
-library(zoo)
+# загружаем пакеты
+library(readxl) # пакет для чтения файлов из Excel 
+library(glmnet) # чтобы оценивать LASSO
+library(lmtest) # разные тесты для линейных регрессионных моделей 
+library(psych) # отсюда используем функцию describe() для описательных статистик
+library(lubridate) # для работы с датами
+library(zoo) # для работы с временными рядами
+library(car) # разные тесты, используем vif()
 
+# для разных преобразований данных 
+library(tidyr)  
+library(dplyr) # широко известный
+library(reshape2) # функции melt(), dcast()
+
+# читаем почищенные данные, бросаем взгляд на полученную табличку
 ik <- read_excel("case_3_original.xlsx")
 glimpse(ik)
 
+# названия столбцов в таблице
 colnames(ik)
 
-
+# так можно получить вектор с числами от 12 до 1
 12:1
-
+# повторить вектор от 12 до 1 два раза
 rep(12:1, 2)
+# те же числа, в другом порядке: каждое число повторяется по два раза
 rep(12:1, each=2)
-rep(c("usd","upak"),12)
 
+# кусочки новых имен для столбцов 5:28
+# вектор из 12 пар "usd", "upak"
+rep(c("usd","upak"), 12)
+
+# новые имена столбцов 5:28 получим склеиванием кусочков
+# "2012-", номера месяца от 12 до 1, "_" и названия переменной "usd" или "upak"
 newnames <- paste0("2012-",
                    rep(12:1, each=2),"_",
                    rep(c("usd","upak"),12)  )
 newnames
+
+# заменяем старые имена столбцов 5:28 на созданные новые
 colnames(ik)[5:28] <- newnames
 
+# структура полученной таблички
 glimpse(ik)
+# описательные статистики для количественных признаков
 describe(ik)
 
-
+# переходим от широкой таблицы к длинной
+# закрепляем столбцы "id", "firm", "name" и "full_name"
 ik_melted <- melt(data=ik, id.vars = c("id","firm","name","full_name"))
 glimpse(ik_melted)
 
+# столбец variable содержит дату и название показателя "usd" или "upak"
+# делим на два: date и sales, по разделителю "_"
 ik_final <- separate(ik_melted, variable, into=c("date","sales"), sep="_")
 glimpse(ik_final)
+# справка для функции separate
 ?separate
 
+# преобразуем переменную "sales" к факторному типу
 ik_final <- ik_final %>% mutate(sales=factor(sales))
 glimpse(ik_final)
 
+# переменная "date" преобразована к типу даты вида "месяц год"
 ik_final <- ik_final %>% mutate(date=as.yearmon(date))
 glimpse(ik_final)
 
-ymd("2015-06-18") + days(42) + months(3)
 
 # простые операции с датами
+# прибавили к 18 июня 3 месяца и 42 дня
+ymd("2015-06-18") + days(42) + months(3)
+
+# создали отдельно столбики со значением года и месяца
+# появился новый столбик, в котором к текущей дате прибавляется 5 месяцев и 10 дней
 ik_plus <- ik_final %>% mutate(year=year(date), month=month(date),
               newdate=as.POSIXct(date) + months(5) + days(10))
 glimpse(ik_plus)
 
-
+# проблемы, возникающие при оценивании линейной регрессии
 # мультиколлинеарность
 
-# жесткая
+# может быть жесткая
+# один из регрессоров может быть точно выражен через второй
+
+# оценим линейную регрессию суммы продаж на переменные "month" и "2*month"
 m1 <- lm(data=ik_plus, value~month+I(2*month))
+# R оценивает только один из коэффициентов
 summary(m1)
 
-# нестрогая 
-m2 <- lm(data=cars, dist~poly(speed,4,raw = TRUE) )
-summary(m2)
+# может быть нестрогая
+# используем готовый массив данных "cars"
+# можно посмотреть описание
+# табличка со значениями скорости автомобиля и длины тормозного пути, 50 наблюдений
 help(cars)
-cars
 
+# оцениваем регрессию длины тормозного пути на полином четвертой степени для скорости 
+m2 <- lm(data=cars, dist~poly(speed,4,raw = TRUE))
+summary(m2)
+
+# заметить наличие мультиколлинеарности можно по тому, что все коэффициенты не значимы,
+# но регрессия значима вцелом (значение F-статистики)
+
+# та же регрессия, но с пятой степенью и другой формой записи,
+# позволяющей рассчитать VIF -- коэффициенты вздутия дисперсии
+# ещё один индикатор наличия мультиколлинеарности
 m2 <- lm(data=cars, dist~speed+I(speed^2)+
            I(speed^3) + I(speed^4)+I(speed^5))
 summary(m2)
+# значения vif
 vif(m2)
 
+# как бороться?
 # по здравому смыслу упростить модель до исчезновения МК
 m2 <- lm(data=cars, dist~speed)
 summary(m2)
 
+
+# использовать LASSO регрессию (функция cv.glmnet)
+# LASSO сдерживает коэффициенты и обнуляет некоторые из них,
+# что делает результаты регрессии более устойчивыми
+
 # для функции cv.glmnet нужен отдельно y и отдельно матрица X без константы
 y <- cars$dist
+# создаем матрицу с перечисленными столбцами (используемыми регрессорами)
+# "0" -- отсутствие константы
 X <- model.matrix(data=cars,
                   ~0+speed+I(speed^2)+
                     I(speed^3)+I(speed^4)+I(speed^5))
 
+# оцениваем LASSO
 mlasso <- cv.glmnet(X, y)
+# можно достать оттуда подобранное значение lambda
 mlasso$lambda.1se
 
 coef(mlasso, s=5) # коэффициенты регрессии для lambda=5
-coef(mlasso, s="lambda.1se")
+coef(mlasso, s="lambda.1se") # коэффициенты для оптимальной lambda
 
+# график изменения суммы квадратов ошибок в зависимости от логарифма lambda
+# количество ненулевых коэффициентов
 plot(mlasso)
 
-vignette(package="glmnet")
+# виньетка для пакета glmnet
 vignette("glmnet_beta", package="glmnet")
 
+# график изменения коэффициентов для разных значений логарифма lambda
 plot(mlasso$glmnet.fit, xvar = "lambda", label = TRUE)
 
 
